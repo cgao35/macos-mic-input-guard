@@ -24,6 +24,19 @@ struct Input: Equatable, Codable {
     var label: String { name }
 }
 
+// Describe the actual default input, not the saved lock target.
+func inputSymbol(_ input: Input?) -> String {
+    guard let input = input else { return "mic.slash" }
+    let name = input.name.lowercased()
+    if name.contains("studio display") { return "display" }
+    if name.contains("airpods max") { return "airpodsmax" }
+    if name.contains("airpods pro") { return "airpodspro" }
+    if name.contains("airpods") { return "airpods" }
+    if name.contains("iphone") { return "iphone" }
+    if name.contains("macbook") { return "laptopcomputer" }
+    return "mic"
+}
+
 func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
 }
@@ -182,8 +195,8 @@ final class Monitor: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
     }
     func settle() {
-        guard let next = currentInput() else { return }
         defer { previous = currentInput(); updateMenu(); saveStatus() }
+        guard let next = currentInput() else { return }
         if let old = previous, old.uid != next.uid { latest = "\(old.label) → \(next.label)" }
         guard let target = fixedInput() else { attempts = 0; problem = ""; return }
         if matches(next, target) { attempts = 0; problem = ""; return }
@@ -233,10 +246,19 @@ final class Monitor: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
     func menuWillOpen(_ menu: NSMenu) { updateMenu(); menuOpen = true }
     func menuDidClose(_ menu: NSMenu) { menuOpen = false }
     func updateMenu() {
+        let input = currentInput()
+        let name = input?.label ?? "无可用输入"
+        let description = "当前输入：\(name)"
+        let symbol = inputSymbol(input)
+        let icon = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+            ?? NSImage(systemSymbolName: "mic", accessibilityDescription: description)
+        icon?.isTemplate = true
+        item.button?.image = icon
+        let lockDescription = fixedInput().map { "已固定：\($0.label)" } ?? "未固定"
+        item.button?.toolTip = "\(description) · \(lockDescription)"
+        item.button?.setAccessibilityLabel(description)
         guard !menuOpen, let menu = item?.menu else { return }
         menu.removeAllItems()
-        let name = currentInput()?.label ?? "无法读取"
-        item.button?.toolTip = "当前输入：\(name) · \(isFixed() ? "已固定：\(fixedInput()!.label)" : "未固定")"
         let heading = NSMenuItem(title: "当前输入：\(name)", action: nil, keyEquivalent: ""); menu.addItem(heading)
         if !listenerError.isEmpty { menu.addItem(NSMenuItem(title: listenerError, action: nil, keyEquivalent: "")) }
         if auth == "denied" { menu.addItem(NSMenuItem(title: "通知未获允许，请在系统设置中开启", action: nil, keyEquivalent: "")) }
@@ -274,7 +296,7 @@ final class Monitor: NSObject, NSApplicationDelegate, UNUserNotificationCenterDe
     @objc func quit() { NSApp.terminate(nil) }
     func saveStatus() {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let state: [String: Any] = ["current": currentInput()?.label ?? "unknown", "fixed": isFixed(), "fixedTarget": fixedInput()?.label ?? "", "problem": problem, "corrections": corrections, "authorization": auth, "lastChange": latest, "notification": notice, "delivered": delivered, "listenerCount": listeners.count, "error": listenerError, "updated": ISO8601DateFormatter().string(from: Date())]
+        let state: [String: Any] = ["inputSymbol": inputSymbol(currentInput()), "current": currentInput()?.label ?? "unknown", "fixed": isFixed(), "fixedTarget": fixedInput()?.label ?? "", "problem": problem, "corrections": corrections, "authorization": auth, "lastChange": latest, "notification": notice, "delivered": delivered, "listenerCount": listeners.count, "error": listenerError, "updated": ISO8601DateFormatter().string(from: Date())]
         if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) { try? data.write(to: directory.appendingPathComponent("status.json"), options: .atomic) }
     }
 }
